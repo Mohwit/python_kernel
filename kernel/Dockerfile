@@ -13,6 +13,10 @@ RUN mkdir -p /app/state && chmod 777 /app/state
 
 # Create a non-root user for security
 RUN useradd -m -s /bin/bash sandbox
+
+# Create .local directory with proper permissions for the sandbox user
+RUN mkdir -p /home/sandbox/.local && chown -R sandbox:sandbox /home/sandbox/.local
+
 USER sandbox
 
 # Default command

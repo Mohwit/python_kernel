@@ -8,6 +8,7 @@ A secure, persistent Python code execution environment using Docker containers w
 - **Function Persistence**: Both pre-loaded and dynamically defined functions persist
 - **Docker Isolation**: All code runs in secure, isolated Docker containers
 - **Session Management**: Each kernel gets its own isolated volume namespace
+- **Package Management**: Manual installation and automatic default packages
 - **Package Persistence**: Installed packages persist across sessions in volumes
 - **Security**: Non-root execution with volume isolation and security constraints
 - **Resource Management**: Configurable memory and CPU limits
@@ -97,6 +98,8 @@ print(f"6 * 7 = {result}")
 
 ### Installing Packages
 
+#### Manual Installation
+
 ```python
 # Install a package (persists across kernel sessions)
 result = kernel.install_package("requests")
@@ -106,6 +109,28 @@ result = kernel.execute("""
 import requests
 response = requests.get('https://api.github.com')
 print(f"Status: {response.status_code}")
+""")
+```
+
+#### Default Packages
+
+```python
+from kernel import PersistentKernel
+
+# Automatically install packages during initialization
+kernel = PersistentKernel(
+    default_packages=["requests", "numpy", "pandas"],
+    session_id="data_session"
+)
+
+# Packages are already available
+result = kernel.execute("""
+import requests
+import numpy as np
+import pandas as pd
+
+print("All packages ready to use!")
+print(f"NumPy version: {np.__version__}")
 """)
 ```
 
@@ -122,7 +147,8 @@ PersistentKernel(
     timeout=30,              # Execution timeout in seconds
     memory_limit="512m",     # Docker memory limit
     cpu_limit="0.5",         # Docker CPU limit
-    session_id="default"     # Unique session identifier for volume isolation
+    session_id="default",    # Unique session identifier for volume isolation
+    default_packages=None    # List of packages to install automatically
 )
 ```
 
@@ -354,19 +380,13 @@ This project is open source. Feel free to use and modify as needed.
 
 ## Changelog
 
-### v2.0.0
-
-- **Volume-Based Architecture**: Migrated from host memory to Docker volume storage
-- **Enhanced Security**: Eliminated host memory pollution and improved isolation
-- **Session Management**: Added session-based volume isolation
-- **Function Persistence**: Improved function source extraction and persistence
-- **Cleanup Support**: Added volume cleanup functionality
-- **Code Optimization**: Cleaned up unused code and improved documentation
-
 ### v1.0.0
 
-- Initial release
-- Basic persistent kernel functionality
-- Docker container isolation
-- Package installation support
-- Function persistence across executions
+- **Volume-Based Architecture**: Secure state storage in Docker volumes (not host memory)
+- **Function Persistence**: Both pre-loaded and dynamically defined functions persist
+- **Default Packages**: Automatic package installation during kernel initialization
+- **Session Management**: Isolated volume namespaces for each kernel session
+- **Package Management**: Manual installation and persistent package storage
+- **Docker Security**: Non-root execution with container isolation
+- **Resource Management**: Configurable memory, CPU limits, and timeouts
+- **Cleanup Support**: Volume cleanup functionality for session management

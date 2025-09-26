@@ -25,7 +25,8 @@ class PersistentKernel:
                  timeout: int = 30,
                  memory_limit: str = "512m",
                  cpu_limit: str = "0.5",
-                 session_id: str = "default") -> None:
+                 session_id: str = "default",
+                 default_packages: Optional[list] = None) -> None:
         """
         Initialize the persistent kernel.
         
@@ -36,11 +37,13 @@ class PersistentKernel:
             memory_limit: Docker memory limit (e.g., "512m")
             cpu_limit: Docker CPU limit (e.g., "0.5")
             session_id: Unique identifier for this kernel session
+            default_packages: List of packages to install automatically
         """
         self.initial_namespace = namespace or {}
         self.imports = imports
         self.timeout = timeout
         self.session_id = session_id
+        self.default_packages = default_packages or []
         
         # Initialize Docker runner
         self.docker_runner = DockerRunner(
@@ -57,8 +60,11 @@ class PersistentKernel:
                 raise RuntimeError("Failed to build Docker image")
             print()
         
-        # Initialize state and run imports
+        # Initialize state and install default packages
         self._initialize_volume_state()
+        self._install_default_packages()
+        
+        # Run imports if specified
         if self.imports:
             result = self._execute_with_state(self.imports)
             if not result["success"]:
@@ -67,6 +73,7 @@ class PersistentKernel:
     def reset(self) -> None:
         """Reset the kernel namespace to initial state."""
         self._initialize_volume_state()
+        self._install_default_packages()
         if self.imports:
             result = self._execute_with_state(self.imports)
             if not result["success"]:
@@ -349,6 +356,23 @@ except Exception as e:
         if not result.success:
             print(f"Warning: Failed to initialize volume state: {result.error}")
 
+    def _install_default_packages(self) -> None:
+        """Install default packages specified during initialization."""
+        if not self.default_packages:
+            return
+            
+        print(f"Installing {len(self.default_packages)} default packages...")
+        
+        for package in self.default_packages:
+            print(f"Installing {package}...")
+            result = self.install_package(package)
+            if not result.get("success", False):
+                print(f"Warning: Failed to install default package '{package}'")
+            else:
+                print(f"Successfully installed {package}")
+        
+        print("Default packages installation completed")
+        print()  # Add blank line for consistency
 
     def _indent_code(self, code: str, indent: str = "    ") -> str:
         """Indent code for inclusion in a try block."""
@@ -469,7 +493,7 @@ except Exception as e:
 import subprocess
 import sys
 
-print(f"📦 Installing {package_name}...")
+print(f"Installing {package_name}...")
 result = subprocess.run([sys.executable, '-m', 'pip', 'install', '--user', '{package_name}'], 
                       capture_output=True, text=True)
 if result.returncode == 0:
