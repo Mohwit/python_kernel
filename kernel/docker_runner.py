@@ -8,7 +8,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Dict
 from pathlib import Path
 
 @dataclass
@@ -26,13 +26,15 @@ class DockerRunner:
                  memory_limit: str = "512m",
                  cpu_limit: str = "0.5",
                  timeout: int = 30,
-                 session_id: str = "default"):
+                 session_id: str = "default",
+                 volume_mounts: Optional[Dict[str, str]] = None):
         """Initialize the Docker runner."""
         self.image_name = image_name
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.timeout = timeout
         self.session_id = session_id
+        self.volume_mounts = volume_mounts or {}
         self.dockerfile_path = os.path.join(os.path.dirname(__file__), "Dockerfile")
         
         # Create persistent package directory
@@ -94,10 +96,18 @@ class DockerRunner:
                 "--security-opt", "no-new-privileges:true",
                 "-v", f"{self.state_volume_name}:/app/state",
                 "-v", f"{self.packages_volume_name}:/home/sandbox/.local",
+            ]
+            
+            # Add user-specified volume mounts (read-only)
+            for host_path, container_path in self.volume_mounts.items():
+                docker_cmd.extend(["-v", f"{host_path}:{container_path}:ro"])
+            
+            # Add user and command
+            docker_cmd.extend([
                 "--user", "sandbox",
                 self.image_name,
                 "python3", "-c", python_code
-            ]
+            ])
             
             # Execute the container
             result = subprocess.run(

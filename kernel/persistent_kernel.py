@@ -8,6 +8,7 @@ state stored in isolated volumes.
 
 import json
 import inspect
+import os
 from typing import Any, Dict, Optional
 from .docker_runner import DockerRunner
 
@@ -26,7 +27,8 @@ class PersistentKernel:
                  memory_limit: str = "512m",
                  cpu_limit: str = "0.5",
                  session_id: str = "default",
-                 default_packages: Optional[list] = None) -> None:
+                 default_packages: Optional[list] = None,
+                 volume_mounts: Optional[Dict[str, str]] = None) -> None:
         """
         Initialize the persistent kernel.
         
@@ -38,19 +40,25 @@ class PersistentKernel:
             cpu_limit: Docker CPU limit (e.g., "0.5")
             session_id: Unique identifier for this kernel session
             default_packages: List of packages to install automatically
+            volume_mounts: Dict mapping host paths to container paths for read-only mounting
         """
         self.initial_namespace = namespace or {}
         self.imports = imports
         self.timeout = timeout
         self.session_id = session_id
         self.default_packages = default_packages or []
+        self.volume_mounts = volume_mounts or {}
+        
+        # Validate volume mounts
+        self._validate_volume_mounts()
         
         # Initialize Docker runner
         self.docker_runner = DockerRunner(
             memory_limit=memory_limit,
             cpu_limit=cpu_limit,
             timeout=timeout,
-            session_id=session_id
+            session_id=session_id,
+            volume_mounts=self.volume_mounts
         )
         
         # Build Docker image if needed
@@ -507,3 +515,15 @@ else:
     def cleanup(self) -> bool:
         """Clean up the persistent volumes for this kernel session."""
         return self.docker_runner.cleanup_volumes()
+    
+    def _validate_volume_mounts(self) -> None:
+        """Validate that all host paths in volume_mounts exist and are accessible."""
+        for host_path, container_path in self.volume_mounts.items():
+            if not os.path.exists(host_path):
+                raise ValueError(f"Host path does not exist: {host_path}")
+            if not os.path.isdir(host_path) and not os.path.isfile(host_path):
+                raise ValueError(f"Host path is neither a file nor directory: {host_path}")
+            if not os.access(host_path, os.R_OK):
+                raise ValueError(f"Host path is not readable: {host_path}")
+            if not container_path.startswith('/'):
+                raise ValueError(f"Container path must be absolute: {container_path}")
