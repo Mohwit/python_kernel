@@ -13,6 +13,9 @@ A secure, persistent Python code execution environment using Docker containers w
 - **Security**: Non-root execution with volume isolation and security constraints
 - **Resource Management**: Configurable memory and CPU limits
 - **Timeout Protection**: Configurable execution timeouts to prevent runaway code
+- **🔒 Network Security**: Endpoint-based execution with HTTP request whitelisting
+- **🛡️ AI Agent Safety**: Prevent environment variable exposure through secure execution
+- **🌐 Flexible Network Modes**: Choose between restricted, isolated, or default networking
 
 ## Project Structure
 
@@ -22,9 +25,18 @@ python_kernel/
 │   ├── __init__.py              # Package initialization
 │   ├── persistent_kernel.py     # Main PersistentKernel class
 │   ├── docker_runner.py         # Docker container management
+│   ├── container_network_guard.py # Container-level network filtering
 │   └── Dockerfile              # Docker image configuration
+├── examples/
+│   ├── README.md               # Examples documentation
+│   ├── basic_usage.py          # Basic kernel functionality
+│   ├── network_restrictions.py # Network security examples
+│   ├── volume_mounting.py      # File system access examples
+│   ├── api_server.py           # FastAPI server for integration
+│   └── fastapi_integration.py  # FastAPI + sandbox example
 ├── functions.py                 # Example functions for testing
-├── example.py                   # Usage example
+├── data/
+│   └── test.csv                # Sample data file
 └── README.md                   # This file
 ```
 
@@ -47,6 +59,25 @@ python_kernel/
 3. **The Docker image will be built automatically on first use**
 
 ## Quick Start
+
+### Run Examples
+
+```bash
+# Basic functionality - code execution, functions, variables, packages
+python examples/basic_usage.py
+
+# Network security - endpoint whitelisting and isolation
+python examples/network_restrictions.py
+
+# File system access - volume mounting and data processing
+python examples/volume_mounting.py
+
+# FastAPI integration - secure API endpoints
+python examples/api_server.py  # Terminal 1
+python examples/fastapi_integration.py  # Terminal 2
+```
+
+See [`examples/README.md`](examples/README.md) for detailed documentation.
 
 ### Basic Usage
 
@@ -219,6 +250,210 @@ The kernel uses Docker volumes for secure, isolated state storage:
 - **Session Isolation**: Each kernel gets unique volume namespace
 - **Container Isolation**: All execution happens in ephemeral containers
 - **Non-root Execution**: Code runs as non-privileged sandbox user
+
+## Network Security & AI Agent Safety
+
+### Overview
+
+The PersistentKernel provides advanced network security features designed specifically for AI agent use cases. These features prevent:
+
+- **Environment Variable Exposure**: By avoiding function passing to the sandbox
+- **Unauthorized Network Access**: Through endpoint whitelisting and request filtering
+- **Data Exfiltration**: By restricting outbound connections to approved endpoints only
+
+### Network Modes
+
+#### 1. Restricted Mode (Recommended for AI Agents)
+
+```python
+kernel = PersistentKernel(
+    allowed_endpoints=[
+        "https://api.myservice.com",
+        "https://httpbin.org",
+        "regex:https://api\\.example\\.com/v[0-9]+/.*"
+    ],
+    network_mode="restricted"
+)
+```
+
+- Only whitelisted endpoints accessible via HTTP requests
+- All other network access blocked at application level
+- Supports URL prefixes and regex patterns
+
+#### 2. Isolated Mode (Maximum Security)
+
+```python
+kernel = PersistentKernel(
+    network_mode="isolated"
+)
+```
+
+- Complete network isolation using Docker's `--network none`
+- No HTTP requests possible
+- Ideal for pure computation tasks
+
+#### 3. Default Mode (Legacy)
+
+```python
+kernel = PersistentKernel(
+    network_mode="default"
+)
+```
+
+- Normal Docker networking
+- No restrictions (not recommended for AI agents)
+
+### Endpoint Configuration
+
+#### URL Patterns
+
+```python
+allowed_endpoints = [
+    "https://api.example.com",                    # Exact domain match
+    "https://api.example.com/v1",                 # Path prefix match
+    "https://httpbin.org",                        # Domain with any path
+]
+```
+
+#### Regex Patterns
+
+```python
+allowed_endpoints = [
+    "regex:https://api\\.myservice\\.com/v[0-9]+/.*",  # Versioned API
+    "regex:https://[a-z]+\\.example\\.com/.*",         # Subdomain pattern
+]
+```
+
+### Secure Usage Example (Docker-level Restrictions)
+
+```python
+from kernel import PersistentKernel
+
+# Create secure kernel for AI agent using Docker-level restrictions
+kernel = PersistentKernel(
+    namespace={},  # No functions passed - prevents env var exposure
+    allowed_endpoints=[
+        "https://api.myservice.com",
+        "https://httpbin.org/json"
+    ],
+    network_mode="restricted",  # Uses Docker env vars + container filtering
+    session_id="ai_agent_session"
+)
+
+# Safe execution - network restrictions enforced at Docker level
+result = kernel.execute("""
+import requests
+
+# This works - endpoint is whitelisted
+response = requests.get('https://httpbin.org/json')
+print(f"Allowed request successful: {response.status_code}")
+
+# This fails - blocked by container-level network guard
+try:
+    response = requests.get('https://google.com')
+except PermissionError as e:
+    print(f"Blocked unauthorized request: {e}")
+""")
+```
+
+### Complete Network Isolation
+
+```python
+# For maximum security - complete network isolation
+kernel = PersistentKernel(
+    network_mode="isolated"  # Uses Docker --network none
+)
+
+result = kernel.execute("""
+# Network requests will fail completely
+try:
+    import requests
+    requests.get('https://httpbin.org')
+except Exception as e:
+    print(f"Network blocked: {type(e).__name__}")
+
+# But local computation works fine
+result = sum(x**2 for x in range(10))
+print(f"Local computation: {result}")
+""")
+```
+
+### Security Comparison
+
+| Feature               | Function Passing   | Endpoint-based      |
+| --------------------- | ------------------ | ------------------- |
+| Environment Variables | ❌ Exposed         | ✅ Protected        |
+| Network Access        | ❌ Unrestricted    | ✅ Whitelisted Only |
+| Code Injection Risk   | ❌ Higher          | ✅ Lower            |
+| AI Agent Suitability  | ❌ Not Recommended | ✅ Recommended      |
+
+### Docker-level Implementation
+
+The network security is implemented at two levels:
+
+1. **Docker Container Level**:
+
+   - `isolated` mode uses `docker run --network none` for complete isolation
+   - `restricted` mode uses environment variables to pass endpoint whitelist
+   - Uses controlled DNS servers for additional security
+
+2. **Container Runtime Level**:
+   - `container_network_guard.py` patches Python's `requests` and `urllib` modules
+   - Intercepts HTTP requests and validates against whitelist
+   - Provides clear error messages for blocked requests
+
+**Benefits of Docker-level Approach**:
+
+- ✅ **Simpler Implementation**: No complex proxy setup or network management
+- ✅ **Better Performance**: No request interception overhead for allowed endpoints
+- ✅ **More Reliable**: Uses Docker's proven networking features
+- ✅ **Easier Debugging**: Clear separation between Docker and application concerns
+- ✅ **Lower Resource Usage**: No additional proxy containers needed
+
+### FastAPI Integration Pattern
+
+For AI agents that need to access external services, the recommended pattern is to create FastAPI endpoints that the sandbox can call:
+
+```python
+# api_server.py - Your secure API server
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class DataRequest(BaseModel):
+    data: List[float]
+    operation: str
+
+@app.post("/process-data")
+async def process_data(request: DataRequest):
+    # Your secure business logic here
+    if request.operation == "sum":
+        result = sum(request.data)
+    # ... other operations
+    return {"result": result, "operation": request.operation}
+
+# Sandbox usage
+kernel = PersistentKernel(
+    allowed_endpoints=["http://localhost:8000"],
+    network_mode="restricted"
+)
+
+result = kernel.execute("""
+import requests
+response = requests.post("http://localhost:8000/process-data",
+                        json={"data": [1,2,3], "operation": "sum"})
+print(response.json())
+""")
+```
+
+**Benefits**:
+
+- ✅ **API-first Architecture**: Clean separation between AI agent and business logic
+- ✅ **Input Validation**: Pydantic models ensure data integrity
+- ✅ **Access Control**: Only expose specific functionality to AI agents
+- ✅ **Audit Trail**: Log all API calls for monitoring
+- ✅ **Rate Limiting**: Control API usage with FastAPI middleware
 
 ## Examples
 

@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Dict
 from pathlib import Path
+# Docker network restrictions are handled inline
 
 @dataclass
 class DockerExecutionResult:
@@ -27,7 +28,9 @@ class DockerRunner:
                  cpu_limit: str = "0.5",
                  timeout: int = 30,
                  session_id: str = "default",
-                 volume_mounts: Optional[Dict[str, str]] = None):
+                 volume_mounts: Optional[Dict[str, str]] = None,
+                 allowed_endpoints: Optional[list] = None,
+                 network_mode: str = "restricted"):
         """Initialize the Docker runner."""
         self.image_name = image_name
         self.memory_limit = memory_limit
@@ -35,7 +38,11 @@ class DockerRunner:
         self.timeout = timeout
         self.session_id = session_id
         self.volume_mounts = volume_mounts or {}
+        self.allowed_endpoints = allowed_endpoints or []
+        self.network_mode = network_mode  # "restricted", "isolated", or "default"
         self.dockerfile_path = os.path.join(os.path.dirname(__file__), "Dockerfile")
+        
+        # Network restrictions will be applied at Docker run time
         
         # Create persistent package directory
         self.packages_dir = Path.home() / ".python_sandbox_packages"
@@ -73,7 +80,7 @@ class DockerRunner:
             return False
     
     def execute(self, python_code: str) -> DockerExecutionResult:
-        """Execute Python code in a Docker container."""
+        """Execute Python code in a Docker container with network restrictions."""
         start_time = time.time()
         
         # Build image if it doesn't exist
@@ -98,6 +105,29 @@ class DockerRunner:
                 "-v", f"{self.packages_volume_name}:/home/sandbox/.local",
             ]
             
+            # Apply Docker-level network restrictions
+            if self.network_mode == "isolated":
+                # Complete network isolation using Docker
+                docker_cmd.extend(["--network", "none"])
+            elif self.network_mode == "restricted":
+                # Use environment variable to pass allowed endpoints to container
+                endpoints_env = ",".join(self.allowed_endpoints)
+                docker_cmd.extend(["-e", f"ALLOWED_ENDPOINTS={endpoints_env}"])
+                
+                # Check if we need host networking for localhost endpoints
+                needs_host_network = any(
+                    "localhost" in endpoint or "127.0.0.1" in endpoint or "host.docker.internal" in endpoint
+                    for endpoint in self.allowed_endpoints
+                )
+                
+                if needs_host_network:
+                    # Use host networking to access host services
+                    docker_cmd.extend(["--network", "host"])
+                else:
+                    # Use controlled DNS for external endpoints
+                    docker_cmd.extend(["--dns", "1.1.1.1"])
+            # "default" mode uses normal Docker networking
+            
             # Add user-specified volume mounts (read-only)
             for host_path, container_path in self.volume_mounts.items():
                 docker_cmd.extend(["-v", f"{host_path}:{container_path}:ro"])
@@ -106,7 +136,7 @@ class DockerRunner:
             docker_cmd.extend([
                 "--user", "sandbox",
                 self.image_name,
-                "python3", "-c", python_code
+                "python3", "-c", python_code  # Use original code, not restricted_code
             ])
             
             # Execute the container
@@ -141,6 +171,11 @@ class DockerRunner:
                 execution_time=time.time() - start_time
             )
     
+    def cleanup_network(self) -> bool:
+        """Clean up Docker-level network resources."""
+        # With the simplified approach, no network cleanup needed
+        return True
+
     def _image_exists(self) -> bool:
         """Check if the Docker image exists."""
         try:
@@ -171,6 +206,10 @@ class DockerRunner:
     def cleanup_volumes(self) -> bool:
         """Remove the persistent volumes for this session."""
         try:
+            # Clean up network resources
+            self.cleanup_network()
+            
+            # Clean up volumes
             for volume_name in [self.state_volume_name, self.packages_volume_name]:
                 subprocess.run([
                     "docker", "volume", "rm", volume_name
