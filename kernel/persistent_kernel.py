@@ -28,7 +28,9 @@ class PersistentKernel:
                  cpu_limit: str = "0.5",
                  session_id: str = "default",
                  default_packages: Optional[list] = None,
-                 volume_mounts: Optional[Dict[str, str]] = None) -> None:
+                 volume_mounts: Optional[Dict[str, str]] = None,
+                 allowed_endpoints: Optional[list] = None,
+                 network_mode: str = "restricted") -> None:
         """
         Initialize the persistent kernel.
         
@@ -41,6 +43,8 @@ class PersistentKernel:
             session_id: Unique identifier for this kernel session
             default_packages: List of packages to install automatically
             volume_mounts: Dict mapping host paths to container paths for read-only mounting
+            allowed_endpoints: List of allowed HTTP endpoints for network requests
+            network_mode: Network restriction mode ("restricted", "isolated", or "default")
         """
         self.initial_namespace = namespace or {}
         self.imports = imports
@@ -48,17 +52,21 @@ class PersistentKernel:
         self.session_id = session_id
         self.default_packages = default_packages or []
         self.volume_mounts = volume_mounts or {}
+        self.allowed_endpoints = allowed_endpoints or []
+        self.network_mode = network_mode
         
         # Validate volume mounts
         self._validate_volume_mounts()
         
-        # Initialize Docker runner
+        # Initialize Docker runner with network restrictions
         self.docker_runner = DockerRunner(
             memory_limit=memory_limit,
             cpu_limit=cpu_limit,
             timeout=timeout,
             session_id=session_id,
-            volume_mounts=self.volume_mounts
+            volume_mounts=self.volume_mounts,
+            allowed_endpoints=self.allowed_endpoints,
+            network_mode=self.network_mode
         )
         
         # Build Docker image if needed
@@ -118,11 +126,11 @@ class PersistentKernel:
                 "error": result.error
             }
         
-        # Filter out state management messages from output
+        # Filter out state management and network restriction messages from output
         try:
             lines = result.output.strip().split('\n')
             output_lines = [line for line in lines 
-                          if not line.startswith(("STATE_SAVED", "STATE_LOADED"))]
+                          if not line.startswith(("STATE_SAVED", "STATE_LOADED", "NETWORK_RESTRICTIONS:", "NETWORK_GUARD:"))]
             
             return {
                 "success": True,
@@ -145,6 +153,19 @@ class PersistentKernel:
         if self.imports:
             imports_section = f"# Execute imports\n{self.imports}\n"
         
+        # Add network guard import for restricted mode
+        network_guard_import = ""
+        if self.network_mode == "restricted" and self.allowed_endpoints:
+            network_guard_import = """
+# Import network guard for endpoint restrictions
+import sys
+sys.path.insert(0, '/app')
+try:
+    import network_guard
+except ImportError:
+    pass  # Network guard not available
+"""
+
         stateful_code = f'''
 import json
 import sys
@@ -152,6 +173,8 @@ import inspect
 import os
 from io import StringIO
 import textwrap
+
+{network_guard_import}
 
 {imports_section}
 
